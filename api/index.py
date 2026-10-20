@@ -17,18 +17,21 @@ class VercelPathFixer:
         self.wsgi_app = wsgi_app
 
     def __call__(self, environ, start_response):
-        matched_path = environ.get("HTTP_X_MATCHED_PATH")
-        if matched_path:
-            path_only = matched_path.split("?")[0]
-            environ["PATH_INFO"] = path_only if path_only else "/"
-            environ["SCRIPT_NAME"] = ""
-        else:
-            path_info = environ.get("PATH_INFO", "")
+        raw_path = (
+            environ.get("HTTP_X_MATCHED_PATH")
+            or environ.get("HTTP_X_ORIGINAL_URI")
+            or environ.get("REQUEST_URI")
+            or environ.get("RAW_URI")
+            or environ.get("PATH_INFO", "")
+        )
+
+        if raw_path:
+            path_only = raw_path.split("?")[0]
             for prefix in ["/api/index.py", "/api/index"]:
-                if path_info.startswith(prefix):
-                    path_info = path_info[len(prefix) :]
+                if path_only == prefix:
+                    path_only = "/"
                     break
-            environ["PATH_INFO"] = path_info if path_info else "/"
+            environ["PATH_INFO"] = path_only if path_only else "/"
             environ["SCRIPT_NAME"] = ""
 
         return self.wsgi_app(environ, start_response)
