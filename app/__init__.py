@@ -82,4 +82,19 @@ def create_app(config_name: str = None) -> Flask:
     def missing_token_callback(error):
         return {"error": "Authorization token is missing", "code": "authorization_required"}, 401
 
+    # Standard JSON error handlers for API consistency
+    @app.errorhandler(404)
+    def handle_404(e):
+        from flask import request
+        return {"error": f"Endpoint not found: {request.path}", "code": "not_found"}, 404
+
+    @app.errorhandler(405)
+    def handle_405(e):
+        from flask import request
+        return {"error": f"Method {request.method} not allowed on {request.path}", "code": "method_not_allowed"}, 405
+
+    @app.errorhandler(500)
+    def handle_500(e):
+        return {"error": "Internal server error", "code": "internal_error"}, 500
+
     return app

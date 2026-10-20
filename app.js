@@ -65,7 +65,12 @@ const api = {
         updateNavAuthState(null);
       }
 
-      const data = await response.json().catch(() => ({}));
+      let data = {};
+      try {
+        data = await response.json();
+      } catch (e) {
+        data = { error: response.ok ? '' : `Server returned error (${response.status} ${response.statusText || ''})`.trim() };
+      }
       return { ok: response.ok, status: response.status, data };
     } catch (err) {
       console.error(`API Error [${endpoint}]:`, err);
