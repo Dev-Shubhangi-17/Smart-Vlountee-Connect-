@@ -69,17 +69,6 @@ def create_app(config_name: str = None) -> Flask:
     def health():
         return {"status": "ok", "message": "Smart Volunteer Connect API is running!"}
 
-    @app.route("/api/index", methods=["GET", "POST"])
-    def debug_api_index():
-        from flask import request
-        return {
-            "path": request.path,
-            "url": request.url,
-            "args": dict(request.args),
-            "headers": dict(request.headers),
-            "environ_keys": [k for k in request.environ.keys() if "PATH" in k or "URI" in k or "VERCEL" in k or "URL" in k]
-        }
-
     # JWT error handlers
     @jwt.expired_token_loader
     def expired_token_callback(jwt_header, jwt_payload):
