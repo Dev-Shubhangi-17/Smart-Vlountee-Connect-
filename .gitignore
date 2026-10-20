@@ -44,3 +44,10 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Database
+*.db
+*.sqlite3
+
+# Testing
+.pytest_cache/

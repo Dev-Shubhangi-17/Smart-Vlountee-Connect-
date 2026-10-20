@@ -1,4 +1,4 @@
-"""Contact form routes — store messages in DB and optionally send email."""
+"""Contact form routes — store messages in DB, view messages, and optionally send email."""
 
 from flask import Blueprint, request, jsonify
 from ..extensions import db, mail
@@ -56,3 +56,10 @@ def submit_contact():
         "message": "Thank you for reaching out! We'll get back to you within 24 hours.",
         "contact_id": msg.id,
     }), 201
+
+
+@contact_bp.route("", methods=["GET"])
+def list_contacts():
+    """List contact messages (sorted newest first)."""
+    messages = ContactMessage.query.order_by(ContactMessage.created_at.desc()).all()
+    return jsonify({"messages": [m.to_dict() for m in messages], "total": len(messages)}), 200

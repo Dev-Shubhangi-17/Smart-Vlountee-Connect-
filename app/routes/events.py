@@ -1,4 +1,4 @@
-"""Events routes — CRUD for events, enrollment, feedback."""
+"""Events routes — CRUD for events, enrollment, attendance, feedback."""
 
 from datetime import date
 from flask import Blueprint, request, jsonify
@@ -23,7 +23,6 @@ def _optional_jwt():
     """Try to load JWT but don't fail if not present. Returns (identity, claims) or (None, {})."""
     try:
         verify_jwt_in_request(optional=True)
-        from flask_jwt_extended import get_jwt_identity, get_jwt
         return get_jwt_identity(), get_jwt()
     except Exception:
         return None, {}
@@ -52,14 +51,16 @@ def list_events():
 
     query = Event.query
 
-    if status:
+    if status and status != "all":
         query = query.filter_by(status=status)
     if city:
         query = query.filter(Event.city.ilike(f"%{city}%"))
-    if category:
+    if category and category != "all":
         query = query.filter(Event.category.ilike(f"%{category}%"))
     if search:
-        query = query.filter(Event.title.ilike(f"%{search}%"))
+        query = query.filter(
+            (Event.title.ilike(f"%{search}%")) | (Event.description.ilike(f"%{search}%"))
+        )
     if date_from:
         try:
             query = query.filter(Event.event_date >= date.fromisoformat(date_from))
@@ -86,7 +87,9 @@ def list_events():
 @events_bp.route("/<int:event_id>", methods=["GET"])
 def get_event(event_id):
     """Get a single event by ID (with full details)."""
-    event = Event.query.get_or_404(event_id)
+    event = db.session.get(Event, event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
     return jsonify(event.to_dict()), 200
 
 
@@ -107,7 +110,9 @@ def create_event():
     if claims.get("role") != "ngo":
         return jsonify({"error": "Only NGOs can create events"}), 403
 
-    ngo = NGO.query.get(get_jwt_identity())
+    user_id = get_jwt_identity()
+    pk = int(user_id) if str(user_id).isdigit() else user_id
+    ngo = db.session.get(NGO, pk)
     if not ngo:
         return jsonify({"error": "NGO not found"}), 404
 
@@ -142,8 +147,8 @@ def create_event():
         venue=data.get("venue"),
         event_date=event_date,
         start_time=start_time,
-        duration_hours=data.get("duration_hours"),
-        max_volunteers=data.get("max_volunteers"),
+        duration_hours=float(data.get("duration_hours", 0.0) or 0.0),
+        max_volunteers=int(data["max_volunteers"]) if data.get("max_volunteers") else None,
         image_url=data.get("image_url"),
         status="active",
     )
@@ -162,9 +167,11 @@ def update_event(event_id):
     if claims.get("role") != "ngo":
         return jsonify({"error": "Only NGOs can update events"}), 403
 
-    event = Event.query.get_or_404(event_id)
+    event = db.session.get(Event, event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
 
-    if str(event.ngo_id) != get_jwt_identity():
+    if str(event.ngo_id) != str(get_jwt_identity()):
         return jsonify({"error": "You can only update your own events"}), 403
 
     data = request.get_json(silent=True) or {}
@@ -188,9 +195,9 @@ def update_event(event_id):
             pass
 
     if "duration_hours" in data:
-        event.duration_hours = data["duration_hours"]
+        event.duration_hours = float(data["duration_hours"] or 0.0)
     if "max_volunteers" in data:
-        event.max_volunteers = data["max_volunteers"]
+        event.max_volunteers = int(data["max_volunteers"]) if data["max_volunteers"] else None
 
     db.session.commit()
     return jsonify({"message": "Event updated!", "event": event.to_dict()}), 200
@@ -204,9 +211,11 @@ def delete_event(event_id):
     if claims.get("role") != "ngo":
         return jsonify({"error": "Only NGOs can delete events"}), 403
 
-    event = Event.query.get_or_404(event_id)
+    event = db.session.get(Event, event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
 
-    if str(event.ngo_id) != get_jwt_identity():
+    if str(event.ngo_id) != str(get_jwt_identity()):
         return jsonify({"error": "You can only delete your own events"}), 403
 
     # Soft delete — mark as cancelled
@@ -227,11 +236,15 @@ def enroll_in_event(event_id):
     if claims.get("role") != "volunteer":
         return jsonify({"error": "Only volunteers can enroll in events"}), 403
 
-    volunteer = Volunteer.query.get(get_jwt_identity())
+    user_id = get_jwt_identity()
+    pk = int(user_id) if str(user_id).isdigit() else user_id
+    volunteer = db.session.get(Volunteer, pk)
     if not volunteer:
         return jsonify({"error": "Volunteer not found"}), 404
 
-    event = Event.query.get_or_404(event_id)
+    event = db.session.get(Event, event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
 
     if event.status != "active":
         return jsonify({"error": "This event is no longer accepting enrollments"}), 400
@@ -272,7 +285,9 @@ def unenroll_from_event(event_id):
     if claims.get("role") != "volunteer":
         return jsonify({"error": "Only volunteers can un-enroll from events"}), 403
 
-    volunteer = Volunteer.query.get(get_jwt_identity())
+    user_id = get_jwt_identity()
+    pk = int(user_id) if str(user_id).isdigit() else user_id
+    volunteer = db.session.get(Volunteer, pk)
     if not volunteer:
         return jsonify({"error": "Volunteer not found"}), 404
 
@@ -292,13 +307,102 @@ def unenroll_from_event(event_id):
 
 
 # ---------------------------------------------------------------------------
+# NGO: Manage Event Enrollments & Record Attendance
+# ---------------------------------------------------------------------------
+
+@events_bp.route("/<int:event_id>/enrollments", methods=["GET"])
+@jwt_required()
+def get_event_enrollments(event_id):
+    """Get list of volunteers enrolled in this event. NGO owner only."""
+    claims = get_jwt()
+    if claims.get("role") != "ngo":
+        return jsonify({"error": "Only NGOs can view event enrollments"}), 403
+
+    event = db.session.get(Event, event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+
+    if str(event.ngo_id) != str(get_jwt_identity()):
+        return jsonify({"error": "You can only view enrollments for your own events"}), 403
+
+    enrollments = event.enrollments.all()
+    results = []
+    for enr in enrollments:
+        v = enr.volunteer
+        results.append({
+            "id": enr.id,
+            "volunteer_id": enr.volunteer_id,
+            "volunteer_name": v.name if v else "Unknown",
+            "volunteer_email": v.email if v else "",
+            "volunteer_phone": v.phone if v else "",
+            "volunteer_city": v.city if v else "",
+            "enrolled_at": enr.enrolled_at.isoformat() if enr.enrolled_at else None,
+            "attended": enr.attended,
+            "hours_logged": enr.hours_logged,
+            "certificate_issued": enr.certificate_issued,
+            "certificate_url": enr.certificate_url,
+        })
+
+    return jsonify({"event_id": event.id, "enrollments": results, "total": len(results)}), 200
+
+
+@events_bp.route("/<int:event_id>/attendance", methods=["POST"])
+@jwt_required()
+def record_event_attendance(event_id):
+    """Mark volunteer attendance and hours. NGO owner only.
+
+    Body (JSON):
+        enrollment_id*, attended (bool, default True), hours_logged (float), certificate_issued (bool)
+    """
+    claims = get_jwt()
+    if claims.get("role") != "ngo":
+        return jsonify({"error": "Only NGOs can record attendance"}), 403
+
+    event = db.session.get(Event, event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+
+    if str(event.ngo_id) != str(get_jwt_identity()):
+        return jsonify({"error": "You can only record attendance for your own events"}), 403
+
+    data = request.get_json(silent=True) or {}
+    enrollment_id = data.get("enrollment_id")
+    if not enrollment_id:
+        return jsonify({"error": "enrollment_id is required"}), 400
+
+    enr = Enrollment.query.filter_by(id=enrollment_id, event_id=event.id).first()
+    if not enr:
+        return jsonify({"error": "Enrollment record not found for this event"}), 404
+
+    enr.attended = bool(data.get("attended", True))
+    enr.hours_logged = float(data.get("hours_logged", event.duration_hours or 0.0) or 0.0)
+    if data.get("certificate_issued", True):
+        enr.certificate_issued = True
+        enr.certificate_url = data.get("certificate_url", f"/certificates/cert_{enr.id}.pdf")
+
+    # Update volunteer total hours
+    v = enr.volunteer
+    if v:
+        all_attended = v.enrollments.filter_by(attended=True).all()
+        v.total_hours = sum(e.hours_logged for e in all_attended if e.hours_logged)
+
+    db.session.commit()
+    return jsonify({
+        "message": "Attendance and volunteer hours recorded successfully!",
+        "enrollment": enr.to_dict()
+    }), 200
+
+
+# ---------------------------------------------------------------------------
 # Feedback
 # ---------------------------------------------------------------------------
 
 @events_bp.route("/<int:event_id>/feedback", methods=["GET"])
 def get_event_feedback(event_id):
     """Get all feedback for an event (public)."""
-    event = Event.query.get_or_404(event_id)
+    event = db.session.get(Event, event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
     feedbacks = event.feedback.order_by(Feedback.created_at.desc()).all()
     return jsonify({
         "event_id": event_id,
@@ -320,11 +424,15 @@ def submit_feedback(event_id):
     if claims.get("role") != "volunteer":
         return jsonify({"error": "Only volunteers can submit feedback"}), 403
 
-    volunteer = Volunteer.query.get(get_jwt_identity())
+    user_id = get_jwt_identity()
+    pk = int(user_id) if str(user_id).isdigit() else user_id
+    volunteer = db.session.get(Volunteer, pk)
     if not volunteer:
         return jsonify({"error": "Volunteer not found"}), 404
 
-    event = Event.query.get_or_404(event_id)
+    event = db.session.get(Event, event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
 
     # Must have attended
     enrollment = Enrollment.query.filter_by(

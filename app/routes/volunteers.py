@@ -23,7 +23,9 @@ def _get_current_volunteer():
     claims = get_jwt()
     if claims.get("role") != "volunteer":
         return None, (jsonify({"error": "Access restricted to volunteers"}), 403)
-    volunteer = Volunteer.query.get(get_jwt_identity())
+    user_id = get_jwt_identity()
+    pk = int(user_id) if str(user_id).isdigit() else user_id
+    volunteer = db.session.get(Volunteer, pk)
     if not volunteer:
         return None, (jsonify({"error": "Volunteer not found"}), 404)
     return volunteer, None
@@ -67,7 +69,7 @@ def update_profile():
         volunteer.bio = data["bio"]
     if "interests" in data:
         interests = data["interests"]
-        volunteer.interests = ",".join(interests) if isinstance(interests, list) else interests
+        volunteer.interests = ",".join(interests) if isinstance(interests, list) else str(interests or "")
     if "availability" in data:
         volunteer.availability = data["availability"]
     if "profile_picture" in data:
@@ -157,7 +159,7 @@ def get_my_stats():
     total_certificates = volunteer.enrollments.filter_by(certificate_issued=True).count()
     total_feedback_given = volunteer.feedback.count()
 
-    # Recalculate total hours from enrollments in case it drifted
+    # Recalculate total hours from enrollments
     all_enrollments = volunteer.enrollments.filter_by(attended=True).all()
     total_hours = sum(e.hours_logged for e in all_enrollments if e.hours_logged)
 
@@ -179,15 +181,7 @@ def get_my_stats():
 @volunteers_bp.route("/me/matches", methods=["GET"])
 @jwt_required()
 def get_smart_matches():
-    """Return events matched to the volunteer based on interests and city.
-
-    Scoring algorithm:
-        +3  if event.category is in volunteer.interests
-        +2  if event.city == volunteer.city
-        +1  if the event is upcoming (event_date >= today)
-
-    Sorted by score descending, top 10 returned.
-    """
+    """Return events matched to the volunteer based on interests and city."""
     volunteer, err = _get_current_volunteer()
     if err:
         return err
@@ -199,11 +193,14 @@ def get_smart_matches():
     # Only active upcoming events the volunteer hasn't already enrolled in
     enrolled_event_ids = {enr.event_id for enr in volunteer.enrollments.all()}
 
-    upcoming_events = Event.query.filter(
+    query = Event.query.filter(
         Event.event_date >= today,
-        Event.status == "active",
-        Event.id.notin_(enrolled_event_ids) if enrolled_event_ids else True,
-    ).all()
+        Event.status == "active"
+    )
+    if enrolled_event_ids:
+        query = query.filter(Event.id.notin_(enrolled_event_ids))
+
+    upcoming_events = query.all()
 
     scored = []
     for event in upcoming_events:
@@ -223,30 +220,30 @@ def get_smart_matches():
 
 
 # ---------------------------------------------------------------------------
-# Admin: Mark attendance & issue certificate
+# Admin / Demo: Mark attendance & issue certificate
 # ---------------------------------------------------------------------------
 
 @volunteers_bp.route("/me/enrollments/<int:enrollment_id>/attend", methods=["POST"])
 @jwt_required()
 def mark_attended(enrollment_id):
-    """Mark an enrollment as attended and log hours (for demo/admin use)."""
+    """Mark an enrollment as attended and log hours."""
     volunteer, err = _get_current_volunteer()
     if err:
         return err
 
-    enr = Enrollment.query.get_or_404(enrollment_id)
+    enr = db.session.get(Enrollment, enrollment_id)
+    if not enr:
+        return jsonify({"error": "Enrollment not found"}), 404
+
     if enr.volunteer_id != volunteer.id:
         return jsonify({"error": "Not authorized"}), 403
 
     data = request.get_json(silent=True) or {}
     enr.attended = True
     enr.hours_logged = data.get("hours_logged", enr.event.duration_hours if enr.event else 0)
-
-    # Issue certificate if attended
     enr.certificate_issued = True
-    enr.certificate_url = data.get("certificate_url")
+    enr.certificate_url = data.get("certificate_url", f"/certificates/cert_{enr.id}.pdf")
 
-    # Update total volunteer hours
     all_attended = volunteer.enrollments.filter_by(attended=True).all()
     volunteer.total_hours = sum(e.hours_logged for e in all_attended if e.hours_logged)
 

@@ -15,7 +15,9 @@ def _get_current_ngo():
     claims = get_jwt()
     if claims.get("role") != "ngo":
         return None, (jsonify({"error": "Access restricted to NGOs"}), 403)
-    ngo = NGO.query.get(get_jwt_identity())
+    user_id = get_jwt_identity()
+    pk = int(user_id) if str(user_id).isdigit() else user_id
+    ngo = db.session.get(NGO, pk)
     if not ngo:
         return None, (jsonify({"error": "NGO not found"}), 404)
     return ngo, None
@@ -36,7 +38,7 @@ def list_or_register_ngos():
     """
     if request.method == "POST":
         return ngo_register()
-    
+
     city = request.args.get("city")
     cause_area = request.args.get("cause_area")
     search = request.args.get("search")
@@ -67,14 +69,18 @@ def list_or_register_ngos():
 @ngos_bp.route("/<int:ngo_id>", methods=["GET"])
 def get_ngo(ngo_id):
     """Get a single NGO by ID."""
-    ngo = NGO.query.get_or_404(ngo_id)
+    ngo = db.session.get(NGO, ngo_id)
+    if not ngo:
+        return jsonify({"error": "NGO not found"}), 404
     return jsonify(ngo.to_dict()), 200
 
 
 @ngos_bp.route("/<int:ngo_id>/events", methods=["GET"])
 def get_ngo_events(ngo_id):
     """Get all active events for a specific NGO."""
-    ngo = NGO.query.get_or_404(ngo_id)
+    ngo = db.session.get(NGO, ngo_id)
+    if not ngo:
+        return jsonify({"error": "NGO not found"}), 404
     events = ngo.events.filter_by(status="active").order_by(Event.event_date.asc()).all()
     return jsonify({"events": [e.to_dict() for e in events], "total": len(events)}), 200
 
@@ -123,7 +129,7 @@ def update_my_profile():
         ngo.description = data["description"]
     if "cause_areas" in data:
         ca = data["cause_areas"]
-        ngo.cause_areas = ",".join(ca) if isinstance(ca, list) else ca
+        ngo.cause_areas = ",".join(ca) if isinstance(ca, list) else str(ca or "")
     if "logo_url" in data:
         ngo.logo_url = data["logo_url"]
 
