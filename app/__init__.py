@@ -47,12 +47,21 @@ def create_app(config_name: str = None) -> Flask:
     from .routes.stats import stats_bp
     from .routes.contact import contact_bp
 
+    # Register blueprints (with /api and root aliases)
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(volunteers_bp, url_prefix="/api/volunteers")
     app.register_blueprint(ngos_bp, url_prefix="/api/ngos")
     app.register_blueprint(events_bp, url_prefix="/api/events")
     app.register_blueprint(stats_bp, url_prefix="/api/stats")
     app.register_blueprint(contact_bp, url_prefix="/api/contact")
+
+    # Mirror routes without /api for universal serverless compatibility
+    app.register_blueprint(auth_bp, url_prefix="/auth", name="auth_bp_alias")
+    app.register_blueprint(volunteers_bp, url_prefix="/volunteers", name="volunteers_bp_alias")
+    app.register_blueprint(ngos_bp, url_prefix="/ngos", name="ngos_bp_alias")
+    app.register_blueprint(events_bp, url_prefix="/events", name="events_bp_alias")
+    app.register_blueprint(stats_bp, url_prefix="/stats", name="stats_bp_alias")
+    app.register_blueprint(contact_bp, url_prefix="/contact", name="contact_bp_alias")
 
     # Health check
     @app.route("/api/health")
