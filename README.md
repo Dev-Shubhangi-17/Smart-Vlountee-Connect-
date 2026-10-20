@@ -303,3 +303,11 @@ Base URL: `http://localhost:5000/api`
    - `SECRET_KEY`: A randomly generated 64-character secret
    - `JWT_SECRET_KEY`: A randomly generated 64-character secret
    - `FRONTEND_ORIGIN`: Your production frontend domain
+
+---
+
+## 👥 Author & Contributions
+
+- **Author & Maintainer:** [Dev-Shubhangi-17](https://github.com/Dev-Shubhangi-17)
+- **Project:** Smart Volunteer Connect
+- **License:** MIT License
