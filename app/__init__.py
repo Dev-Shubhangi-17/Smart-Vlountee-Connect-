@@ -35,7 +35,7 @@ def create_app(config_name: str = None) -> Flask:
     # CORS — allow frontend origin + localhost dev
     cors.init_app(
         app,
-        resources={r"/api/*": {"origins": [app.config["FRONTEND_ORIGIN"], "http://localhost:*", "http://127.0.0.1:*"]}},
+        resources={r"/*": {"origins": "*"}},
         supports_credentials=True,
     )
 
@@ -56,6 +56,7 @@ def create_app(config_name: str = None) -> Flask:
 
     # Health check
     @app.route("/api/health")
+    @app.route("/health")
     def health():
         return {"status": "ok", "message": "Smart Volunteer Connect API is running!"}
 

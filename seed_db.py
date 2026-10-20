@@ -1,7 +1,6 @@
 """Seed script to populate database with comprehensive sample data for development and demonstration."""
 
 from datetime import date, time, timedelta
-from app import create_app
 from app.extensions import db, bcrypt
 from app.models.ngo import NGO
 from app.models.event import Event
@@ -10,10 +9,9 @@ from app.models.enrollment import Enrollment
 from app.models.feedback import Feedback
 from app.models.contact import ContactMessage
 
-app = create_app()
 
-with app.app_context():
-    # Only seed if database has no NGOs
+def seed_data():
+    """Populate database with sample data if empty."""
     if NGO.query.count() == 0:
         print("[*] Seeding sample NGOs...")
         ngo1 = NGO(
@@ -282,3 +280,11 @@ with app.app_context():
         print("[SUCCESS] Database fully initialized with realistic demonstration data!")
     else:
         print("[INFO] Database already contains data. Skipping seed.")
+
+
+if __name__ == "__main__":
+    from app import create_app
+    app = create_app()
+    with app.app_context():
+        seed_data()
+

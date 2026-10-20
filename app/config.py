@@ -3,13 +3,18 @@ from datetime import timedelta
 
 
 def _fix_database_uri(uri: str | None, default: str) -> str:
-    """Normalize PostgreSQL database URI and provide fallback."""
-    if not uri:
-        return default
-    # SQLAlchemy requires postgresql:// instead of postgres://
-    if uri.startswith("postgres://"):
-        uri = uri.replace("postgres://", "postgresql://", 1)
-    return uri
+    """Normalize PostgreSQL database URI and provide safe fallback."""
+    if uri:
+        # SQLAlchemy requires postgresql:// instead of postgres://
+        if uri.startswith("postgres://"):
+            uri = uri.replace("postgres://", "postgresql://", 1)
+        return uri
+
+    # If running in serverless environment (Vercel / AWS Lambda), root filesystem is read-only
+    if os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+        return "sqlite:////tmp/smart_volunteer_connect.db"
+
+    return default
 
 
 class Config:
@@ -38,12 +43,12 @@ class Config:
         "JWT_SECRET_KEY", "smart-volunteer-connect-jwt-secret-key-32bytes-min"
     )
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(
-        seconds=int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRES", 3600))
+        seconds=int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRES", 86400))
     )
 
     # CORS
     FRONTEND_ORIGIN = os.environ.get(
-        "FRONTEND_ORIGIN", "https://yashmajmudar-33.github.io"
+        "FRONTEND_ORIGIN", "*"
     )
 
     # Mail
@@ -71,7 +76,7 @@ class ProductionConfig(Config):
     DEBUG = False
     SQLALCHEMY_DATABASE_URI = _fix_database_uri(
         os.environ.get("DATABASE_URL"),
-        "postgresql://postgres:postgres@localhost:5432/smart_volunteer_connect"
+        "sqlite:////tmp/smart_volunteer_connect.db" if os.environ.get("VERCEL") else "postgresql://postgres:postgres@localhost:5432/smart_volunteer_connect"
     )
 
 
